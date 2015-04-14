@@ -1,0 +1,2365 @@
+/*
+ * Copyright 2009 Keith Stevens 
+ *
+ * This file is part of the S-Space package and is covered under the terms and
+ * conditions therein.
+ *
+ * The S-Space package is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as published
+ * by the Free Software Foundation and distributed hereunder to you.
+ *
+ * THIS SOFTWARE IS PROVIDED "AS IS" AND NO REPRESENTATIONS OR WARRANTIES,
+ * EXPRESS OR IMPLIED ARE MADE.  BY WAY OF EXAMPLE, BUT NOT LIMITATION, WE MAKE
+ * NO REPRESENTATIONS OR WARRANTIES OF MERCHANT- ABILITY OR FITNESS FOR ANY
+ * PARTICULAR PURPOSE OR THAT THE USE OF THE LICENSED SOFTWARE OR DOCUMENTATION
+ * WILL NOT INFRINGE ANY THIRD PARTY PATENTS, COPYRIGHTS, TRADEMARKS OR OTHER
+ * RIGHTS.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program. If not, see <http://www.gnu.org/licenses/>.
+ */
+
+package edu.ucla.sspace.common;
+
+import edu.ucla.sspace.common.Similarity;
+import edu.ucla.sspace.similarity.*;
+import edu.ucla.sspace.util.DoubleEntry;
+import edu.ucla.sspace.util.IntegerEntry;
+import edu.ucla.sspace.vector.*;
+import edu.ucla.sspace.vector.Vector;
+import gnu.trove.set.TIntSet;
+import gnu.trove.set.hash.TIntHashSet;
+
+import java.lang.reflect.Method;
+import java.util.*;
+
+
+/**
+ * A collection of static methods for computing the similarity, distances,
+ * correlations, and all other vectorized value comparisons between vectors and
+ * arrays.  This is the primary class for comparing the term and document
+ * vectors produced by {@link edu.ucla.sspace.common.SemanticSpace}.
+ *
+ * @author Keith Stevens
+ * @author David Jurgens
+ */
+public class Similarity {
+
+    /**
+     * A type of similarity function to use when generating a {@link java.lang.reflect.Method}
+     */
+    public enum SimType {
+        /**
+         * <a href="http://en.wikipedia.org/wiki/Cosine_similarity">Cosine similarity</a>
+         */
+        COSINE,
+
+        /**
+         * <a
+         * href="http://en.wikipedia.org/wiki/Pearson_product-moment_correlation_coefficient">Pearson
+         * product moment correlation coefficient</a>
+         */
+        PEARSON_CORRELATION,
+
+        EUCLIDEAN,
+
+        SPEARMAN_RANK_CORRELATION,
+
+        /**
+         * <a href="http://en.wikipedia.org/wiki/Jaccard_index">Jaccard Index</a>
+         */
+        JACCARD_INDEX,
+        LIN,
+        KL_DIVERGENCE,
+        AVERAGE_COMMON_FEATURE_RANK,
+
+        /**
+         * <a href="http://en.wikipedia.org/wiki/Kendall%27s_tau">Kendall's
+         * tau</a>
+         */
+        KENDALLS_TAU,
+
+        /**
+         * <a href="http://en.wikipedia.org/wiki/Tanimoto_coefficient#Tanimoto_coefficient_.28extended_Jaccard_coefficient.29">Tanimoto Coefficient</a>
+         */
+        TANIMOTO_COEFFICIENT
+    }
+
+    /**
+     * Uninstantiable
+     */
+    private Similarity() { }
+
+    /**
+     * @deprecated The {@link #getSimilarity(SimType,double[],double[])} method
+     * should be used instead.
+     *
+     * Returns the {@link java.lang.reflect.Method} for getting the similarity of two {@code
+     * double[]} based on the specified similarity type.
+     *
+     * @throws Error if a {@link NoSuchMethodException} is thrown
+     */
+    @Deprecated
+    public static Method getMethod(SimType similarityType) {
+        String methodName = null;
+        switch (similarityType) {
+        case COSINE:
+            methodName = "cosineSimilarity";
+            break;
+        case PEARSON_CORRELATION:
+            methodName = "correlation";
+            break;
+        case EUCLIDEAN:
+            methodName = "euclideanSimilarity";
+            break;
+        case SPEARMAN_RANK_CORRELATION:
+            methodName = "spearmanRankCorrelationCoefficient";
+            break;
+        case JACCARD_INDEX:
+            methodName = "jaccardIndex";
+            break;
+        case AVERAGE_COMMON_FEATURE_RANK:
+            methodName = "averageCommonFeatureRank";
+            break;
+        case LIN:
+            methodName = "linSimilarity";
+            break;
+        case KL_DIVERGENCE:
+            methodName = "klDivergence";
+            break;
+        case KENDALLS_TAU:
+            methodName = "kendallsTau";
+            break;
+        case TANIMOTO_COEFFICIENT:
+            methodName = "tanimotoCoefficient";
+            break;
+
+        default:
+            assert false : similarityType;
+        }
+        Method m = null;
+        try {
+            m = Similarity.class.getMethod(methodName,
+                           new Class[] {double[].class, double[].class});
+        } catch (NoSuchMethodException nsme) {
+            // rethrow
+            throw new Error(nsme);
+        }
+
+        return m;
+    }
+
+    public static SimilarityFunction getSimilarityFunction(
+            SimType similarityType) {
+        switch (similarityType) {
+            case COSINE:
+                return new CosineSimilarity();
+            case PEARSON_CORRELATION:
+                return new PearsonCorrelation();
+            case EUCLIDEAN:
+                return new EuclideanSimilarity();
+            case SPEARMAN_RANK_CORRELATION:
+                return new SpearmanRankCorrelation();
+            case JACCARD_INDEX:
+                return new JaccardIndex();
+            case AVERAGE_COMMON_FEATURE_RANK:
+                return new AverageCommonFeatureRank();
+            case LIN:
+                return new LinSimilarity();
+            case KL_DIVERGENCE:
+                return new KLDivergence();
+            case KENDALLS_TAU:
+                return new KendallsTau();
+            case TANIMOTO_COEFFICIENT:
+                return new TanimotoCoefficient();
+        }
+        throw new IllegalArgumentException("Unhandled SimType: " +
+                                           similarityType);
+    }
+
+    /**
+     * Calculates the similarity of the two vectors using the provided
+     * similarity measure.
+     *
+     * @param similarityType the similarity evaluation to use when comparing
+     *        {@code a} and {@code b}
+     * @param a a vector
+     * @param b a vector
+     *
+     * @return the similarity according to the specified measure
+     */
+    public static double getSimilarity(SimType similarityType,
+                                       double[] a, double[] b) {
+        switch (similarityType) {
+            case COSINE:
+                return cosineSimilarity(a, b);
+            case PEARSON_CORRELATION:
+                return correlation(a, b);
+            case EUCLIDEAN:
+                return euclideanSimilarity(a, b);
+            case SPEARMAN_RANK_CORRELATION:
+                return spearmanRankCorrelationCoefficient(a, b);
+            case JACCARD_INDEX:
+                return jaccardIndex(a, b);
+            case AVERAGE_COMMON_FEATURE_RANK:
+                return averageCommonFeatureRank(a, b);
+            case LIN:
+                return linSimilarity(a, b);
+            case KL_DIVERGENCE:
+                return klDivergence(a, b);
+            case KENDALLS_TAU:
+                return kendallsTau(a, b);
+            case TANIMOTO_COEFFICIENT:
+                return tanimotoCoefficient(a, b);
+        }
+        throw new IllegalArgumentException("Unhandled SimType: " +
+                                           similarityType);
+    }
+
+    /**
+     * Calculates the similarity of the two vectors using the provided
+     * similarity measure.
+     *
+     * @param similarityType the similarity evaluation to use when comparing
+     *        {@code a} and {@code b}
+     * @param a a {@code Vector}
+     * @param b a {@code Vector}
+     *
+     * @return the similarity according to the specified measure
+     */
+    public static <T extends Vector> double getSimilarity(
+            SimType similarityType, T a, T b) {
+        switch (similarityType) {
+            case COSINE:
+                return cosineSimilarity(a, b);
+            case PEARSON_CORRELATION:
+                return correlation(a, b);
+            case EUCLIDEAN:
+                return euclideanSimilarity(a, b);
+            case SPEARMAN_RANK_CORRELATION:
+                return spearmanRankCorrelationCoefficient(a, b);
+            case JACCARD_INDEX:
+                return jaccardIndex(a, b);
+            case AVERAGE_COMMON_FEATURE_RANK:
+                return averageCommonFeatureRank(a, b);
+            case LIN:
+                return linSimilarity(a, b);
+            case KL_DIVERGENCE:
+                return klDivergence(a, b);
+            case KENDALLS_TAU:
+                return kendallsTau(a, b);
+            case TANIMOTO_COEFFICIENT:
+                return tanimotoCoefficient(a, b);
+        }
+        return 0;
+    }
+
+    /**
+     * Throws an exception if either array is {@code null} or if the array
+     * lengths do not match.
+     */
+    private static void check(double[] a, double[] b) {
+        if (a.length != b.length) {
+            throw new IllegalArgumentException(
+            "input array lengths do not match");
+        }
+    }
+
+    /**
+     * Throws an exception if either array is {@code null} or if the array
+     * lengths do not match.
+     */
+    private static void check(int[] a, int[] b) {
+        if (a.length != b.length) {
+            throw new IllegalArgumentException(
+                    "input array lengths do not match");
+        }
+    }
+
+    /**
+     * Throws an exception if either {@code Vector} is {@code null} or if the
+     * {@code Vector} lengths do not match.
+     */
+    private static void check(Vector a, Vector b) {
+        if (a.length() != b.length())
+            throw new IllegalArgumentException(
+                    "input vector lengths do not match");
+    }
+
+    /**
+     * Returns the cosine similarity of the two arrays.
+     *
+     * @throws IllegalArgumentException when the length of the two vectors are
+     *                                   not the same.
+     */
+    public static double cosineSimilarity(double[] a, double[] b) {
+        check(a,b);
+        double dotProduct = 0.0;
+        double aMagnitude = 0.0;
+        double bMagnitude = 0.0;
+        for (int i = 0; i < b.length ; i++) {
+            double aValue = a[i];
+            double bValue = b[i];
+            aMagnitude += aValue * aValue;
+            bMagnitude += bValue * bValue;
+            dotProduct += aValue * bValue;
+        }
+        aMagnitude = Math.sqrt(aMagnitude);
+        bMagnitude = Math.sqrt(bMagnitude);
+        return (aMagnitude == 0 || bMagnitude == 0)
+            ? 0
+            : dotProduct / (aMagnitude * bMagnitude);
+    }
+
+    /**
+     * Returns the cosine similarity of the two arrays.
+     *
+     * @throws IllegalArgumentException when the length of the two vectors are
+     *                                   not the same.
+     */
+    public static double cosineSimilarity(int[] a, int[] b) {
+        check(a, b);
+
+        long dotProduct = 0;
+        long aMagnitude = 0;
+        long bMagnitude = 0;
+        for (int i = 0; i < b.length ; i++) {
+            int aValue = a[i];
+            int bValue = b[i];
+            aMagnitude += aValue * aValue;
+            bMagnitude += bValue * bValue;
+            dotProduct += aValue * bValue;
+        }
+
+        double aMagnitudeSqRt = Math.sqrt(aMagnitude);
+        double bMagnitudeSqRt = Math.sqrt(bMagnitude);
+        return (aMagnitudeSqRt == 0 || bMagnitudeSqRt == 0)
+            ? 0
+            : dotProduct / (aMagnitudeSqRt * bMagnitudeSqRt);
+    }
+
+    /**
+     * Returns the cosine similarity of the two {@code DoubleVector}.
+     */
+    @SuppressWarnings("unchecked")
+    public static double cosineSimilarity(DoubleVector a, DoubleVector b) {
+        double dotProduct = 0.0;
+        double aMagnitude = a.magnitude();
+        double bMagnitude = b.magnitude();
+
+        // Check whether both vectors support fast iteration over their non-zero
+        // values.  If so, use only the non-zero indices to speed up the
+        // computation by avoiding zero multiplications
+        if (a instanceof Iterable && b instanceof Iterable) {
+            // Check whether we can easily determine how many non-zero values
+            // are in each vector.  This value is used to select the iteration
+            // order, which affects the number of get(value) calls.
+            boolean useA =
+                (a.length() < b.length() ||
+                 (a instanceof SparseVector && b instanceof SparseVector) &&
+                 ((SparseVector)a).getNonZeroIndices().length <
+                 ((SparseVector)b).getNonZeroIndices().length);
+
+            // Choose the smaller of the two to use in computing the dot
+            // product.  Because it would be more expensive to compute the
+            // intersection of the two sets, we assume that any potential
+            // misses would be less of a performance hit.
+            if (useA) {
+                DoubleVector t = a;
+                a = b;
+                b = t;
+            }
+
+            for (DoubleEntry e : ((Iterable<DoubleEntry>)b)) {
+                int index = e.index();
+                double aValue = a.get(index);
+                double bValue = e.value();
+                dotProduct += aValue * bValue;
+            }
+        }
+
+        // Check whether both vectors are sparse.  If so, use only the non-zero
+        // indices to speed up the computation by avoiding zero multiplications
+        else if (a instanceof SparseVector && b instanceof SparseVector) {
+            SparseVector svA = (SparseVector)a;
+            SparseVector svB = (SparseVector)b;
+            int[] nzA = svA.getNonZeroIndices();
+            int[] nzB = svB.getNonZeroIndices();
+
+            // Choose the smaller of the two to use in computing the dot
+            // product.  Because it would be more expensive to compute the
+            // intersection of the two sets, we assume that any potential
+            // misses would be less of a performance hit.
+            if (a.length() < b.length() ||
+                nzA.length < nzB.length) {
+                DoubleVector t = a;
+                a = b;
+                b = t;
+            }
+
+            for (int nz : nzB) {
+                double aValue = a.get(nz);
+                double bValue = b.get(nz);
+                dotProduct += aValue * bValue;
+            }
+        }
+
+        // Check if the second vector is sparse.  If so, use only the non-zero
+        // indices of b to speed up the computation by avoiding zero
+        // multiplications.
+        else if (b instanceof SparseVector) {
+            SparseVector svB = (SparseVector)b;
+            for (int nz : svB.getNonZeroIndices())
+                dotProduct += b.get(nz) * a.get(nz);
+        }
+
+        // Check if the first vector is sparse.  If so, use only the non-zero
+        // indices of a to speed up the computation by avoiding zero
+        // multiplications.
+        else if (a instanceof SparseVector) {
+            SparseVector svA = (SparseVector)a;
+            for (int nz : svA.getNonZeroIndices())
+                dotProduct += b.get(nz) * a.get(nz);
+        }
+
+        // Otherwise, just assume both are dense and compute the full amount
+        else {
+            // Swap the vectors such that the b is the shorter vector and a is
+            // the longer vector, or of equal length.   In the case that the two
+            // vectors of unequal length, this will prevent any calls to out of
+            // bounds values in the smaller vector.
+            if (a.length() < b.length()) {
+                DoubleVector t = a;
+                a = b;
+                b = t;
+            }
+
+            for (int i = 0; i < b.length(); i++) {
+                double aValue = a.get(i);
+                double bValue = b.get(i);
+                dotProduct += aValue * bValue;
+            }
+        }
+        return (aMagnitude == 0 || bMagnitude == 0)
+            ? 0 : dotProduct / (aMagnitude * bMagnitude);
+    }
+
+    /**
+     * Returns the cosine similarity of the two {@code DoubleVector}.
+     *
+     * @throws IllegalArgumentException when the length of the two vectors are
+     *                                   not the same.
+     */
+    @SuppressWarnings("unchecked")
+    public static double cosineSimilarity(IntegerVector a, IntegerVector b) {
+        check(a,b);
+
+        int dotProduct = 0;
+        double aMagnitude = a.magnitude();
+        double bMagnitude = b.magnitude();
+
+        // Check whether both vectors support fast iteration over their non-zero
+        // values.  If so, use only the non-zero indices to speed up the
+        // computation by avoiding zero multiplications
+        if (a instanceof Iterable && b instanceof Iterable) {
+            // Check whether we can easily determine how many non-zero values
+            // are in each vector.  This value is used to select the iteration
+            // order, which affects the number of get(value) calls.
+            boolean useA =
+                (a instanceof SparseVector && b instanceof SparseVector)
+                && ((SparseVector)a).getNonZeroIndices().length <
+                   ((SparseVector)b).getNonZeroIndices().length;
+
+            // Choose the smaller of the two to use in computing the dot
+            // product.  Because it would be more expensive to compute the
+            // intersection of the two sets, we assume that any potential
+            // misses would be less of a performance hit.
+            if (useA) {
+                IntegerVector t = a;
+                a = b;
+                b = t;
+            }
+
+            for (IntegerEntry e : ((Iterable<IntegerEntry>)b)) {
+                int index = e.index();
+                int aValue = a.get(index);
+                int bValue = e.value();
+                dotProduct += aValue * bValue;
+            }
+        }
+
+        // Check whether both vectors are sparse.  If so, use only the non-zero
+        // indices to speed up the computation by avoiding zero multiplications
+        else if (a instanceof SparseVector && b instanceof SparseVector) {
+            SparseVector svA = (SparseVector)a;
+            SparseVector svB = (SparseVector)b;
+            int[] nzA = svA.getNonZeroIndices();
+            int[] nzB = svB.getNonZeroIndices();
+            // Choose the smaller of the two to use in computing the dot
+            // product.  Because it would be more expensive to compute the
+            // intersection of the two sets, we assume that any potential
+            // misses would be less of a performance hit.
+            if (nzA.length < nzB.length) {
+                for (int nz : nzA) {
+                    int aValue = a.get(nz);
+                    int bValue = b.get(nz);
+                    dotProduct += aValue * bValue;
+                }
+            }
+            else {
+                for (int nz : nzB) {
+                    int aValue = a.get(nz);
+                    int bValue = b.get(nz);
+                    dotProduct += aValue * bValue;
+                }
+            }
+        }
+
+        // Otherwise, just assume both are dense and compute the full amount
+        else {
+            for (int i = 0; i < b.length(); i++) {
+                int aValue = a.get(i);
+                int bValue = b.get(i);
+                dotProduct += aValue * bValue;
+            }
+        }
+        return (aMagnitude == 0 || bMagnitude == 0)
+            ? 0 : dotProduct / (aMagnitude * bMagnitude);
+    }
+
+    /**
+     * Returns the cosine similarity of the two {@code DoubleVector}.
+     *
+     * @throws IllegalArgumentException when the length of the two vectors are
+     *                                   not the same.
+     */
+    public static double cosineSimilarity(Vector a, Vector b) {
+        return
+            (a instanceof IntegerVector && b instanceof IntegerVector)
+            ? cosineSimilarity((IntegerVector)a, (IntegerVector)b)
+            : cosineSimilarity(Vectors.asDouble(a), Vectors.asDouble(b));
+    }
+
+    /**
+     * Returns the Pearson product-moment correlation coefficient of the two
+     * arrays.
+     *
+     * @throws IllegalArgumentException when the length of the two vectors are
+     *                                   not the same.
+     */
+    public static double correlation(double[] arr1, double[] arr2) {
+        check(arr1, arr2);
+
+        // REMINDER: this could be made more effecient by not looping
+        double xSum = 0;
+        double ySum = 0;
+        for (int i = 0; i < arr1.length; ++i) {
+            xSum += arr1[i];
+            ySum += arr2[i];
+        }
+
+        double xMean = xSum / arr1.length;
+        double yMean = ySum / arr1.length;
+
+        double numerator = 0, xSqSum = 0, ySqSum = 0;
+        for (int i = 0; i < arr1.length; ++i) {
+            double x = arr1[i] - xMean;
+            double y = arr2[i] - yMean;
+            numerator += x * y;
+            xSqSum += (x * x);
+            ySqSum += (y * y);
+        }
+        if (xSqSum == 0 || ySqSum == 0)
+            return 0;
+
+        return numerator / Math.sqrt(xSqSum * ySqSum);
+    }
+
+    /**
+     * Returns the Pearson product-moment correlation coefficient of the two
+     * arrays.
+     *
+     * @throws IllegalArgumentException when the length of the two vectors are
+     *                                   not the same.
+     */
+    public static double correlation(int[] arr1, int[] arr2) {
+        check(arr1, arr2);
+
+        // REMINDER: this could be made more effecient by not looping
+        long xSum = 0;
+        long ySum = 0;
+        for (int i = 0; i < arr1.length; ++i) {
+            xSum += arr1[i];
+            ySum += arr2[i];
+        }
+
+        double xMean = xSum / (double)(arr1.length);
+        double yMean = ySum / (double)(arr1.length);
+
+        double numerator = 0, xSqSum = 0, ySqSum = 0;
+        for (int i = 0; i < arr1.length; ++i) {
+            double x = arr1[i] - xMean;
+            double y = arr2[i] - yMean;
+            numerator += x * y;
+            xSqSum += (x * x);
+            ySqSum += (y * y);
+        }
+        return numerator / Math.sqrt(xSqSum * ySqSum);
+    }
+
+    /**
+     * Returns the Pearson product-moment correlation coefficient of the two
+     * {@code Vector}s.
+     *
+     * @throws IllegalArgumentException when the length of the two vectors are
+     *                                   not the same.
+     */
+    public static double correlation(DoubleVector arr1, DoubleVector arr2) {
+        check(arr1, arr2);
+
+        //check(arr1, arr2); LK - no reason to check it twice
+
+        // REMINDER: this could be made more effecient by not looping - LK changed.. looping over non-zeros
+        double xSum = 0;
+        double ySum = 0;
+        if (arr1 instanceof SparseVector) {
+            SparseVector svArr1 = (SparseVector)arr1;
+            int[] nzsA = svArr1.getNonZeroIndices();
+            for (int i : nzsA) {
+                xSum += arr1.get(i);
+            }
+        }
+        else {
+            for (int i = 0; i < arr1.length(); ++i) {
+                xSum += arr1.get(i);
+            }
+        }
+        if (arr2 instanceof SparseVector) {
+            SparseVector svArr2 = (SparseVector)arr2;
+            int[] nzsB = svArr2.getNonZeroIndices();
+            for (int i : nzsB) {
+                ySum += arr2.get(i);
+            }
+        }
+        else {
+            for (int i = 0; i < arr2.length(); ++i) {
+                ySum += arr2.get(i);
+            }
+        }
+
+        double xMean = xSum / arr1.length();
+        double yMean = ySum / arr1.length();
+
+        double numerator = 0, xSqSum = 0, ySqSum = 0;
+        for (int i = 0; i < arr1.length(); ++i) {
+            double x = arr1.get(i) - xMean;
+            double y = arr2.get(i) - yMean;
+            numerator += x * y;
+            xSqSum += (x * x);
+            ySqSum += (y * y);
+        }
+        return numerator / Math.sqrt(xSqSum * ySqSum);
+    }
+
+    /**
+     * Returns the Pearson product-moment correlation coefficient of the two
+     * {@code Vector}s.
+     *
+     * @throws IllegalArgumentException when the length of the two vectors are
+     *                                   not the same.
+     */
+    public static double correlation(IntegerVector arr1, DoubleVector arr2) {
+        check(arr1, arr2);
+
+        // REMINDER: this could be made more effecient by not looping
+        double xSum = 0;
+        double ySum = 0;
+        for (int i = 0; i < arr1.length(); ++i) {
+            xSum += arr1.get(i);
+            ySum += arr2.get(i);
+        }
+
+        double xMean = xSum / arr1.length();
+        double yMean = ySum / arr1.length();
+
+        double numerator = 0, xSqSum = 0, ySqSum = 0;
+        for (int i = 0; i < arr1.length(); ++i) {
+            double x = arr1.get(i) - xMean;
+            double y = arr2.get(i) - yMean;
+            numerator += x * y;
+            xSqSum += (x * x);
+            ySqSum += (y * y);
+        }
+        return numerator / Math.sqrt(xSqSum * ySqSum);
+    }
+
+    /**
+     * Returns the Pearson product-moment correlation coefficient of the two
+     * {@code Vector}s.
+     *
+     * @throws IllegalArgumentException when the length of the two vectors are
+     *                                   not the same.
+     */
+    public static double correlation(Vector a, Vector b) {
+        return correlation(Vectors.asDouble(a), Vectors.asDouble(b));
+    }
+
+    /**
+     * Returns the euclidian distance between two arrays of {code double}s.
+     *
+     * @throws IllegalArgumentException when the length of the two vectors are
+     *                                   not the same.
+     */
+    public static double euclideanDistance(double[] a, double[] b) {
+        check(a, b);
+        double sum = 0;
+        for (int i = 0; i < a.length; ++i)
+            sum += Math.pow((a[i] - b[i]), 2);
+        return Math.sqrt(sum);
+    }
+
+    /**
+     * Returns the euclidian distance between two arrays of {code double}s.
+     *
+     * @throws IllegalArgumentException when the length of the two vectors are
+     *                                   not the same.
+     */
+    public static double euclideanDistance(int[] a, int[] b) {
+        check(a, b);
+
+        long sum = 0;
+        for (int i = 0; i < a.length; ++i)
+            sum += Math.pow(a[i] - b[i], 2);
+        return Math.sqrt(sum);
+    }
+
+    /**
+     * Returns the euclidian distance between two {@code DoubleVector}s.
+     *
+     * @throws IllegalArgumentException when the length of the two vectors are
+     *                                   not the same.
+     */
+    public static double euclideanDistance(DoubleVector a, DoubleVector b) {
+        check(a, b);
+
+        if (a instanceof SparseVector && b instanceof SparseVector) {
+            SparseVector svA = (SparseVector)a;
+            SparseVector svB = (SparseVector)b;
+
+            int[] aNonZero = svA.getNonZeroIndices();
+            int[] bNonZero = svB.getNonZeroIndices();
+            TIntSet union = new TIntHashSet(aNonZero);
+            union.addAll(bNonZero);
+
+            double sum = 0;
+            int[] nzIndices = union.toArray();
+            for (int nz : nzIndices) {
+                double x = a.get(nz);
+                double y = b.get(nz);
+                double diff = x - y;
+                sum += diff * diff;
+            }
+            return Math.sqrt(sum);
+
+        } else if (b instanceof SparseVector) {
+            // If b is sparse, use a special case where we use the cached
+            // magnitude of a and the sparsity of b to avoid most of the
+            // computations.
+            SparseVector sb = (SparseVector) b;
+            int[] bNonZero = sb.getNonZeroIndices();
+            double sum = 0;
+
+            // Get the magnitude for a.  This value will often only be computed
+            // once for the first vector once since the DenseVector caches the
+            // magnitude, thus saving a large amount of computation.
+            double aMagnitude = Math.pow(a.magnitude(), 2);
+
+            // Compute the difference between the nonzero values of b and the
+            // corresponding values for a.
+            for (int index : bNonZero) {
+                double value = a.get(index);
+                // Decrement a's value at this index from it's magnitude.
+                aMagnitude -= Math.pow(value, 2);
+                sum += Math.pow(value - b.get(index), 2);
+            }
+
+            // Since the rest of b's values are 0, the difference between a and
+            // b for these values is simply the magnitude of indices which have
+            // not yet been traversed in a.  This corresponds to the modified
+            // magnitude that was computed.
+            sum += aMagnitude;
+
+            return (sum < 0d) ? 0 : Math.sqrt(sum);
+        }
+
+        double sum = 0;
+        for (int i = 0; i < a.length(); ++i)
+            sum += Math.pow((a.get(i) - b.get(i)), 2);
+        return Math.sqrt(sum);
+    }
+
+    /**
+     * Returns the euclidian distance between two {@code DoubleVector}s.
+     *
+     * @throws IllegalArgumentException when the length of the two vectors are
+     *                                   not the same.
+     */
+    public static double euclideanDistance(IntegerVector a, IntegerVector b) {
+        check(a, b);
+
+        if (a instanceof SparseVector && b instanceof SparseVector) {
+            SparseVector svA = (SparseVector)a;
+            SparseVector svB = (SparseVector)b;
+
+            int[] aNonZero = svA.getNonZeroIndices();
+            int[] bNonZero = svB.getNonZeroIndices();
+            HashSet<Integer> sparseIndicesA = new HashSet<Integer>(
+                    aNonZero.length);
+            double sum = 0;
+            for (int nonZero : aNonZero) {
+                sum += Math.pow((a.get(nonZero) - b.get(nonZero)), 2);
+                sparseIndicesA.add(nonZero);
+            }
+
+            for (int nonZero : bNonZero)
+                if (!sparseIndicesA.contains(bNonZero))
+                    sum += Math.pow(b.get(nonZero), 2);
+            return sum;
+        }
+
+        double sum = 0;
+        for (int i = 0; i < a.length(); ++i)
+            sum += Math.pow((a.get(i) - b.get(i)), 2);
+        return Math.sqrt(sum);
+    }
+
+    /**
+     * Returns the euclidian distance between two {@code Vector}s.
+     *
+     * @throws IllegalArgumentException when the length of the two vectors are
+     *                                   not the same.
+     */
+    public static double euclideanDistance(Vector a, Vector b) {
+        return euclideanDistance(Vectors.asDouble(a), Vectors.asDouble(b));
+    }
+
+    /**
+     * Returns the euclidian similiarty between two arrays of values.
+     *
+     * @throws IllegalArgumentException when the length of the two vectors are
+     *                                   not the same.
+     */
+    public static double euclideanSimilarity(int[] a, int[] b) {
+        return 1 / (1 + euclideanDistance(a,b));
+    }
+
+    /**
+     * Returns the euclidian similiarty between two arrays of values.
+     *
+     * @throws IllegalArgumentException when the length of the two vectors are
+     *                                   not the same.
+     */
+    public static double euclideanSimilarity(double[] a, double[] b) {
+        return 1 / (1 + euclideanDistance(a,b));
+    }
+
+    /**
+     * Returns the euclidian similiarty between two arrays of values.
+     *
+     * @throws IllegalArgumentException when the length of the two vectors are
+     *                                   not the same.
+     */
+    public static double euclideanSimilarity(Vector a, Vector b) {
+        return 1 / (1 + euclideanDistance(a,b));
+    }
+
+    /**
+     * Computes the <a href="http://en.wikipedia.org/wiki/Jaccard_index">Jaccard
+     * index</a> of the two sets of elements.
+     */
+    public static double jaccardIndex(Set<?> a, Set<?> b) {
+        int intersection = 0;
+        for (Object o : a) {
+            if (b.contains(o))
+                intersection++;
+        }
+
+        double union = a.size() + b.size() - intersection;
+        return intersection / union;
+    }
+
+    /**
+     * Computes the <a href="http://en.wikipedia.org/wiki/Jaccard_index">Jaccard
+     * index</a> comparing the similarity both arrays when viewed as sets of
+     * samples.
+     */
+    public static double jaccardIndex(double[] a, double[] b) {
+        Set<Double> intersection = new HashSet<Double>();
+        Set<Double> union = new HashSet<Double>();
+        for (double d : a) {
+            intersection.add(d);
+            union.add(d);
+        }
+        Set<Double> tmp = new HashSet<Double>();
+        for (double d : b) {
+            tmp.add(d);
+            union.add(d);
+        }
+
+        intersection.retainAll(tmp);
+        return ((double)(intersection.size())) / union.size();
+    }
+
+    /**
+     * Computes the <a href="http://en.wikipedia.org/wiki/Jaccard_index">Jaccard
+     * index</a> comparing the similarity both arrays when viewed as sets of
+     * samples.
+     */
+    public static double jaccardIndex(int[] a, int[] b) {
+        // The BitSets should be faster than a HashMap since it's back by an
+        // array and operations are just logical bit operations and require no
+        // auto-boxing.  However, if a or b contains large values, then the cost
+        // of creating the necessary size for the BitSet may outweigh its
+        // performance.  At some point, it would be useful to profile the two
+        // methods and their associated worst cases. -jurgens
+        BitSet c = new BitSet();
+        BitSet d = new BitSet();
+        BitSet union = new BitSet();
+        for (int i : a) {
+            c.set(i);
+            union.set(i);
+        }
+        for (int i : b) {
+            d.set(i);
+            union.set(i);
+        }
+
+        // get the intersection
+        c.and(d);
+        return ((double)(c.cardinality())) / union.cardinality();
+    }
+
+    /**
+     * Computes the <a href="http://en.wikipedia.org/wiki/Jaccard_index">Jaccard
+     * index</a> comparing the similarity both {@code DoubleVector}s when viewed
+     * as sets of samples.
+     */
+    public static double jaccardIndex(DoubleVector a, DoubleVector b) {
+        Set<Double> intersection = new HashSet<Double>();
+        Set<Double> union = new HashSet<Double>();
+        for (int i = 0; i < a.length(); ++i) {
+            double d = a.get(i);
+            intersection.add(d);
+            union.add(d);
+        }
+        Set<Double> tmp = new HashSet<Double>();
+        for (int i = 0; i < b.length(); ++i) {
+            double d = b.get(i);
+            tmp.add(d);
+            union.add(d);
+        }
+
+        intersection.retainAll(tmp);
+        return ((double)(intersection.size())) / union.size();
+    }
+
+    /**
+     * Computes the <a href="http://en.wikipedia.org/wiki/Jaccard_index">Jaccard
+     * index</a> comparing the similarity both {@code IntegerVector}s when viewed
+     * as sets of samples.
+     */
+    public static double jaccardIndex(IntegerVector a, IntegerVector b) {
+        Set<Integer> intersection = new HashSet<Integer>();
+        Set<Integer> union = new HashSet<Integer>();
+        for (int i = 0; i < a.length(); ++i) {
+            int d = a.get(i);
+            intersection.add(d);
+            union.add(d);
+        }
+        Set<Integer> tmp = new HashSet<Integer>();
+        for (int i = 0; i < b.length(); ++i) {
+            int d = b.get(i);
+            tmp.add(d);
+            union.add(d);
+        }
+
+        intersection.retainAll(tmp);
+        return ((double)(intersection.size())) / union.size();
+    }
+
+    /**
+     * Computes the <a href="http://en.wikipedia.org/wiki/Jaccard_index">Jaccard
+     * index</a> comparing the similarity both {@code Vector}s when viewed as
+     * sets of samples.
+     */
+    public static double jaccardIndex(Vector a, Vector b) {
+        return jaccardIndex(Vectors.asDouble(a), Vectors.asDouble(b));
+    }
+
+    /**
+     * Computes the Spearman rank correlation coefficient for the two arrays.
+     *
+     * <p> This implementation properly accounts for ties according to the
+     * procedure specified in <i>Nonparametric Statistics for The Behavioral
+     * Sciences</i> by Sidney Siegel and N. John Castellan Jr. Second
+     * Ed. (1988).
+     *
+     * @throws IllegalArgumentException when the length of the two vectors are
+     *                                   not the same.
+     */
+    public static double spearmanRankCorrelationCoefficient(double[] a,
+                                                            double[] b) {
+        check(a, b);
+        int N = a.length;
+        int NcubedMinusN = (N * N * N) - N;
+
+        // Convert a and b into rankings.  The last value of this array is the
+        // correction factor for computing the correlation based on the number
+        // of ties.  (Eq. 9.6; p. 239).  Note that the ranks are not integers
+        // beacused tied values are assigned the average of their ranks (e.g.,
+        // a tie at positions 1 and 2 would be be assigned a rank of 1.5).
+        double[] rankedA = rank(a);
+        double[] rankedB = rank(b);
+
+        double sumDiffs = 0;
+        for (int i = 0; i < rankedA.length - 1; ++i) {
+            double diff = rankedA[i] - rankedB[i];
+            sumDiffs += diff * diff;
+        }
+
+        double aCorrectionFactor = rankedA[rankedA.length - 1];
+        double bCorrectionFactor = rankedB[rankedB.length - 1];
+
+        double tiesSum = aCorrectionFactor + bCorrectionFactor;
+
+        // Compute Spearman's rho using Eq. 9.7 (p. 239)
+        return (NcubedMinusN - (6 * sumDiffs) - ((tiesSum) / 2d))
+            / Math.sqrt((NcubedMinusN * NcubedMinusN)
+                        - (tiesSum * NcubedMinusN)
+                        + (aCorrectionFactor * bCorrectionFactor));
+    }
+
+    /**
+     * Computes the Spearman rank correlation coefficient for the two arrays.
+     *
+     * <p> This implementation properly accounts for ties according to the
+     * procedure specified in <i>Nonparametric Statistics for The Behavioral
+     * Sciences</i> by Sidney Siegel and N. John Castellan Jr. Second
+     * Ed. (1988).
+     *
+     * @throws IllegalArgumentException when the length of the two vectors are
+     *                                   not the same.
+     */
+    public static double spearmanRankCorrelationCoefficient(int[] a, int[] b) {
+        check(a,b);
+
+        int N = a.length;
+        int NcubedMinusN = (N * N * N) - N;
+
+        // Convert a and b into rankings.  The last value of this array is the
+        // correction factor for computing the correlation based on the number
+        // of ties.  (Eq. 9.6; p. 239).  Note that the ranks are not integers
+        // beacused tied values are assigned the average of their ranks (e.g.,
+        // a tie at positions 1 and 2 would be be assigned a rank of 1.5).
+        double[] rankedA = rank(a);
+        double[] rankedB = rank(b);
+
+        double sumDiffs = 0;
+        for (int i = 0; i < rankedA.length - 1; ++i) {
+            double diff = rankedA[i] - rankedB[i];
+            sumDiffs += diff * diff;
+        }
+
+        double aCorrectionFactor = rankedA[rankedA.length - 1];
+        double bCorrectionFactor = rankedB[rankedB.length - 1];
+
+        double tiesSum = aCorrectionFactor + bCorrectionFactor;
+
+        // Compute Spearman's rho using Eq. 9.7 (p. 239)
+        return (NcubedMinusN - (6 * sumDiffs) - ((tiesSum) / 2d))
+            / Math.sqrt((NcubedMinusN * NcubedMinusN)
+                        - (tiesSum * NcubedMinusN)
+                        + (aCorrectionFactor * bCorrectionFactor));
+    }
+
+    /**
+     * Computes the ranks of the values of {@code vals}, returning their ranks
+     * plus an addition array index representing the correction value when using
+     * the ranks to compute the correlation (see Eq. 9.6; p. 239 in
+     * Nonparametric Statistics for The Behavioral Sciences).
+     */
+    static double[] rank(int[] vals) {
+        IntRank[] ranked = new IntRank[vals.length];
+        for (int i = 0; i < vals.length; ++i)
+            ranked[i] = new IntRank(vals[i], i);
+        Arrays.sort(ranked);
+
+        double[] ranks = new double[vals.length + 1];
+        int correctionFactor = 0;
+
+        for (int i = 0; i < ranked.length; ++i) {
+            // Determine how many ties (if any) occur at this rank
+            int ties = 0;
+            for (int j = i + 1; j < ranked.length
+                     && ranked[i].val == ranked[j].val; ++j, ++ties)
+                ;
+            if (ties == 0)
+                ranks[ranked[i].index] = i+1;
+            else {
+                // Each tie is computed as the average of the ties' ranks, e.g.,
+                // two tie at rank 2 would be averaged as rank (2 + 3) / 2 = 2.5
+                double rank = i + 1 + (ties / 2d);
+                for (int j = i; j < i + ties + 1; ++j)
+                    ranks[ranked[j].index] = rank;
+                // Skip to next non-tied value
+                i += ties;
+
+                // Change ties from the number of *additional* tied elements to
+                // the *total* number of tied elements when computing the
+                // correction factor.
+                ties += 1;
+                correctionFactor += ((ties * ties * ties) - ties);
+            }
+        }
+        ranks[ranks.length - 1] = correctionFactor;
+        return ranks;
+    }
+
+
+    static class IntRank implements Comparable<IntRank> {
+
+        int index;
+        int val;
+
+        public IntRank(int val, int index) {
+            this.val = val;
+            this.index = index;
+        }
+
+        public int compareTo(IntRank r) { return val - r.val; }
+
+        public boolean equals(Object o) {
+            if (o instanceof IntRank) {
+                IntRank r = (IntRank)o;
+                return r.val == val && r.index == index;
+            }
+            return false;
+        }
+
+        public int hashCode() { return val; }
+
+        public String toString() {
+            return "(v:" + val +")[" + index + "]";
+        }
+    }
+
+
+    /**
+     * Computes the ranks of the values of {@code vals}, returning their ranks
+     * plus an addition array index representing the correction value when using
+     * the ranks to compute the correlation (see Eq. 9.6; p. 239 in
+     * Nonparametric Statistics for The Behavioral Sciences).
+     */
+    static double[] rank(double[] vals) {
+        DoubleRank[] ranked = new DoubleRank[vals.length];
+        for (int i = 0; i < vals.length; ++i)
+            ranked[i] = new DoubleRank(vals[i], i);
+        Arrays.sort(ranked);
+
+        double[] ranks = new double[vals.length + 1];
+        int correctionFactor = 0;
+
+        for (int i = 0; i < ranked.length; ++i) {
+            // Determine how many ties (if any) occur at this rank
+            int ties = 0;
+            for (int j = i + 1; j < ranked.length
+                     && ranked[i].val == ranked[j].val; ++j, ++ties)
+                ;
+            if (ties == 0)
+                ranks[ranked[i].index] = i+1;
+            else {
+                // Each tie is computed as the average of the ties' ranks, e.g.,
+                // two tie at rank 2 would be averaged as rank (2 + 3) / 2 = 2.5
+                double rank = i + 1 + (ties / 2d);
+                for (int j = i; j < i + ties + 1; ++j)
+                    ranks[ranked[j].index] = rank;
+                // Skip to next non-tied value
+                i += ties;
+
+                // Change ties from the number of *additional* tied elements to
+                // the *total* number of tied elements when computing the
+                // correction factor.
+                ties += 1;
+                correctionFactor += ((ties * ties * ties) - ties);
+            }
+        }
+        ranks[ranks.length - 1] = correctionFactor;
+        return ranks;
+    }
+
+
+    static class DoubleRank implements Comparable<DoubleRank> {
+
+        int index;
+        double val;
+
+        public DoubleRank(double val, int index) {
+            this.val = val;
+            this.index = index;
+        }
+
+        public int compareTo(DoubleRank r) { return Double.compare(val, r.val); }
+
+        public boolean equals(Object o) {
+            if (o instanceof DoubleRank) {
+                DoubleRank r = (DoubleRank)o;
+                return r.val == val && r.index == index;
+            }
+            return false;
+        }
+
+        public int hashCode() { return index; }
+
+        public String toString() {
+            return "(v:" + val +")[" + index + "]";
+        }
+    }
+
+    /**
+     * Computes the Spearman rank correlation coefficient for the two {@code
+     * DoubleVector} instances.
+     *
+     * <p> This implementation properly accounts for ties according to the
+     * procedure specified in <i>Nonparametric Statistics for The Behavioral
+     * Sciences</i> by Sidney Siegel and N. John Castellan Jr. Second
+     * Ed. (1988).
+     *
+     * @throws IllegalArgumentException when the length of the two vectors are
+     *                                   not the same.
+     */
+    public static double spearmanRankCorrelationCoefficient(DoubleVector a,
+                                                            DoubleVector b) {
+        // NOTE: should this code ever be on the critical path, we should
+        // re-implement it to operate on the Vector instances themselves
+        return spearmanRankCorrelationCoefficient(a.toArray(), b.toArray());
+    }
+
+    /**
+     * Computes the Spearman rank correlation coefficient for the two {@code
+     * IntegerVector} instances.
+     *
+     * <p> This implementation properly accounts for ties according to the
+     * procedure specified in <i>Nonparametric Statistics for The Behavioral
+     * Sciences</i> by Sidney Siegel and N. John Castellan Jr. Second
+     * Ed. (1988).
+     *
+     * @throws IllegalArgumentException when the length of the two vectors are
+     *                                   not the same.
+     */
+    public static double spearmanRankCorrelationCoefficient(IntegerVector a,
+                                                            IntegerVector b) {
+        // NOTE: should this code ever be on the critical path, we should
+        // re-implement it to operate on the Vector instances themselves
+        return spearmanRankCorrelationCoefficient(a.toArray(), b.toArray());
+    }
+
+    /**
+     * Computes the Spearman rank correlation coefficient for the two {@code
+     * Vector} instances.
+     *
+     * <p> This implementation properly accounts for ties according to the
+     * procedure specified in <i>Nonparametric Statistics for The Behavioral
+     * Sciences</i> by Sidney Siegel and N. John Castellan Jr. Second
+     * Ed. (1988).
+     *
+     * @throws IllegalArgumentException when the length of the two vectors are
+     *                                   not the same.
+     */
+    public static double spearmanRankCorrelationCoefficient(Vector a,
+                                                            Vector b) {
+        return spearmanRankCorrelationCoefficient(Vectors.asDouble(a),
+                                                  Vectors.asDouble(b));
+    }
+
+    /**
+     * Computes the Average Common Feature Rank between the two feature arrays.
+     * Uses the top 20 features for comparison.
+     *
+     * @throws IllegalArgumentException when the length of the two vectors are
+     *                                   not the same.
+     */
+    public static double averageCommonFeatureRank(double[] a,
+                                                  double[] b) {
+
+        class Pair{
+            public int i;
+            public double v;
+            public Pair(int index, double value){i=index;v=value;}
+            public void set(int index, double value){
+                i=index;
+                v=value;
+            }
+        }
+        class PairCompare implements Comparator<Pair>{
+            // note that 1 and -1 have been switched so that sort will sort in
+            // descending order
+            // this method sorts by value first, then by index
+            public int compare(Pair o1, Pair o2){
+                if(o1.v < o2.v) return 1;
+                else if(o1.v > o2.v) return -1;
+                else{
+                    if(o1.i < o2.i) return 1;
+                    else if(o1.i > o2.i) return -1;
+                    return 0;
+                }
+            }
+
+            public boolean equals(Pair o1, Pair o2){
+                return (compare(o1,o2)==0)?true:false;
+            }
+        }
+
+
+        check(a, b);
+        int size=a.length;
+
+        // number of features to compare
+        // calculate how much 10% is, rounded up.
+        //int n = (int)Math.ceil(a.length/10.0);
+        int n = 20;
+
+        // generate array of index-value pairs for a
+        Pair[] a_index = new Pair[size];
+        for(int i=0;i<size;i++)
+            a_index[i] = new Pair(i,a[i]);
+        // generate array of index-value pairs for b
+        Pair[] b_index = new Pair[size];
+        for(int i=0;i<size;i++)
+            b_index[i] = new Pair(i,b[i]);
+
+        // sort the features in a_rank by weight
+        Arrays.sort(a_index, new PairCompare());
+        // sort the features in b_rank by weight
+        Arrays.sort(b_index, new PairCompare());
+
+        // a_index are index-value pairs, ordered by rank
+        // this loop changes to a_rank which are rank-value, ordered by index
+        // make indices start at 1 so inv(ind) is defined for all indices
+        Pair[] a_rank = new Pair[size];
+        int last_i = 1;
+        for(int i=0;i<size;i++){
+            Pair x = a_index[i];
+            // share rank if tied
+            if(i>0 && a_index[i].v==a_index[i-1].v)
+                a_rank[x.i] = new Pair(last_i,x.v);
+            else{
+                a_rank[x.i] = new Pair(i+1,x.v);
+                last_i=i+1;
+            }
+        }
+        // do the same for b_index and b_rank
+        last_i=1;
+        Pair[] b_rank = new Pair[size];
+        for(int i=0;i<size;i++){
+            Pair x = b_index[i];
+            // share rank if tied
+            if(i>0 && b_index[i].v==b_index[i-1].v)
+                b_rank[x.i] = new Pair(last_i,x.v);
+            else{
+                b_rank[x.i] = new Pair(i+1,x.v);
+                last_i=i+1;
+            }
+        }
+
+        // get best ranked n elements
+        // nTop will be the top n ranking dimensions by weight
+        // where nTop[i] is the ith highest ranking dimension (i.e. feature)
+        int[] nTop = new int[n];
+        boolean[] seenbefore = new boolean[size];
+        Arrays.fill(seenbefore,false);
+        int a_i=0;
+        int b_i=0;
+        for(int i=0;i<n;i++){
+            // skip over features already encountered
+            while(a_i<size && seenbefore[a_index[a_i].i])
+                a_i++;
+            while(b_i<size && seenbefore[b_index[b_i].i])
+                b_i++;
+
+            // assign rank by highest weight
+            //  select the index from A when max(A)>max(B)
+            if(a_i<size
+                && 1 == (new PairCompare()).compare(a_index[a_i],b_index[b_i])
+              ){
+                nTop[i] = a_index[a_i].i;
+                seenbefore[nTop[i]]=true;
+                a_i++;
+            }
+            else{
+                nTop[i] = b_index[b_i].i;
+                seenbefore[nTop[i]]=true;
+                b_i++;
+            }
+        }
+
+        // computer the sum of the average rank for each top feature and divide
+        //    by the number of top features
+        double sum = 0;
+        for(int i=0;i<n;i++){
+            sum += 0.5*(a_rank[nTop[i]].i+b_rank[nTop[i]].i);
+        }
+        //return sum/n;
+        return n/sum;
+
+    }
+
+    /**
+     * Computes the Average Common Feature Rank between the two feature arrays.
+     * Uses the top 20 features for comparison. Converts types and calls
+     * averageCommonFeatureRank(double[],double[])
+     *
+     * @throws IllegalArgumentException when the length of the two vectors are
+     *                                   not the same.
+     */
+    public static double averageCommonFeatureRank(Vector a, Vector b) {
+        return averageCommonFeatureRank(Vectors.asDouble(a).toArray(),
+                                        Vectors.asDouble(b).toArray());
+    }
+
+    /**
+     * Computes the Average Common Feature Rank between the two feature arrays.
+     * Uses the top 20 features for comparison. Converts types and calls
+     * averageCommonFeatureRank(Vector,Vector)
+     *
+     * @throws IllegalArgumentException when the length of the two vectors are
+     *                                   not the same.
+     */
+    public static double averageCommonFeatureRank(int[] a,
+                                                  int[] b) {
+        return averageCommonFeatureRank(Vectors.asVector(a),
+                                        Vectors.asVector(b));
+    }
+
+
+    /**
+     * Computes the lin similarity measure, which is motivated by information
+     * theory priniciples.  This works best if both vectors have already been
+     * weighted using point-wise mutual information.  This similarity measure is
+     * described in more detail in the following paper:
+     *
+     *   <li style="font-family:Garamond, Georgia, serif">D. Lin, "Automatic
+     *   Retrieval and Clustering of Similar Words" <i> Proceedings of the 36th
+     *   Annual Meeting of the Association for Computational Linguistics and
+     *   17th International Conference on Computational Linguistics, Volume 2
+     *   </i>, Montreal, Quebec, Canada, 1998.
+     *   </li>
+     *
+     * @throws IllegalArgumentException when the length of the two vectors are
+     *                                   not the same.
+     */
+    public static double linSimilarity(DoubleVector a, DoubleVector b) {
+        check(a, b);
+
+        // The total amount of information contained in a.
+        double aInformation = 0;
+        // The total amount of information contained in b.
+        double bInformation = 0;
+        // The total amount of information contained in both vectors.
+        double combinedInformation = 0;
+
+        // Special case when both vectors are sparse vectors.
+        if (a instanceof SparseVector &&
+            b instanceof SparseVector) {
+            // Convert both vectors to sparse vectors.
+            SparseVector sa = (SparseVector) a;
+            int[] aNonZeros = sa.getNonZeroIndices();
+
+            SparseVector sb = (SparseVector) b;
+            int[] bNonZeros = sb.getNonZeroIndices();
+
+            // If b is the smaller vector swap it with a.  This allows the dot
+            // product to work over the vector with the smallest number of non
+            // zero values.
+            if (bNonZeros.length < aNonZeros.length) {
+                SparseVector temp = sa;
+                int[] tempNonZeros = aNonZeros;
+
+                sa = sb;
+                aNonZeros = bNonZeros;
+
+                sb = temp;
+                bNonZeros = tempNonZeros;
+            }
+
+            // Compute the combined information by iterating over the vector
+            // with the smallest number of non zero values.
+            for (int index : aNonZeros) {
+                double aValue = a.get(index);
+                double bValue = b.get(index);
+                aInformation += aValue;
+                combinedInformation += aValue + bValue;
+            }
+
+            // Compute the information from the other vector by iterating over
+            // it's non zero values.
+            for (int index : bNonZeros) {
+                bInformation += b.get(index);
+            }
+        }
+        else {
+            // Compute the information between the two vectors by iterating over
+            // all known values.
+            for (int i = 0; i < a.length(); ++i) {
+                double aValue = a.get(i);
+                aInformation += aValue;
+
+                double bValue = b.get(i);
+                bInformation += bValue;
+
+                if (aValue != 0d && bValue != 0d)
+                    combinedInformation += aValue + bInformation;
+            }
+        }
+        return combinedInformation / (aInformation + bInformation);
+    }
+
+    /**
+     * Computes the lin similarity measure, which is motivated by information
+     * theory priniciples.  This works best if both vectors have already been
+     * weighted using point-wise mutual information.  This similarity measure is
+     * described in more detail in the following paper:
+     *
+     *   <li style="font-family:Garamond, Georgia, serif">D. Lin, "Automatic
+     *   Retrieval and Clustering of Similar Words" <i> Proceedings of the 36th
+     *   Annual Meeting of the Association for Computational Linguistics and
+     *   17th International Conference on Computational Linguistics, Volume 2
+     *   </i>, Montreal, Quebec, Canada, 1998.
+     *   </li>
+     *
+     * @throws IllegalArgumentException when the length of the two vectors are
+     *                                   not the same.
+     */
+    public static double linSimilarity(IntegerVector a, IntegerVector b) {
+        check(a, b);
+
+        // The total amount of information contained in a.
+        double aInformation = 0;
+        // The total amount of information contained in b.
+        double bInformation = 0;
+        // The total amount of information contained in both vectors.
+        double combinedInformation = 0;
+
+        // Special case when both vectors are sparse vectors.
+        if (a instanceof SparseVector &&
+            b instanceof SparseVector) {
+            // Convert both vectors to sparse vectors.
+            SparseVector sa = (SparseVector) a;
+            int[] aNonZeros = sa.getNonZeroIndices();
+
+            SparseVector sb = (SparseVector) b;
+            int[] bNonZeros = sb.getNonZeroIndices();
+
+            // If b is the smaller vector swap it with a.  This allows the dot
+            // product to work over the vector with the smallest number of non
+            // zero values.
+            if (bNonZeros.length < aNonZeros.length) {
+                SparseVector temp = sa;
+                int[] tempNonZeros = aNonZeros;
+
+                sa = sb;
+                aNonZeros = bNonZeros;
+
+                sb = temp;
+                bNonZeros = tempNonZeros;
+            }
+
+            // Compute the combined information by iterating over the vector
+            // with the smallest number of non zero values.
+            for (int index : aNonZeros) {
+                double aValue = a.get(index);
+                double bValue = b.get(index);
+                aInformation += aValue;
+                combinedInformation += aValue + bValue;
+            }
+
+            // Compute the information from the other vector by iterating over
+            // it's non zero values.
+            for (int index : bNonZeros) {
+                bInformation += b.get(index);
+            }
+        }
+        else {
+            // Compute the information between the two vectors by iterating over
+            // all known values.
+            for (int i = 0; i < a.length(); ++i) {
+                double aValue = a.get(i);
+                aInformation += aValue;
+
+                double bValue = b.get(i);
+                bInformation += bValue;
+
+                if (aValue != 0d && bValue != 0d)
+                    combinedInformation += aValue + bInformation;
+            }
+        }
+        return combinedInformation / (aInformation + bInformation);
+    }
+
+    /**
+     * Computes the lin similarity measure, which is motivated by information
+     * theory priniciples.  This works best if both vectors have already been
+     * weighted using point-wise mutual information.  This similarity measure is
+     * described in more detail in the following paper:
+     *
+     *   <li style="font-family:Garamond, Georgia, serif">D. Lin, "Automatic
+     *   Retrieval and Clustering of Similar Words" <i> Proceedings of the 36th
+     *   Annual Meeting of the Association for Computational Linguistics and
+     *   17th International Conference on Computational Linguistics, Volume 2
+     *   </i>, Montreal, Quebec, Canada, 1998.
+     *   </li>
+     *
+     * @throws IllegalArgumentException when the length of the two vectors are
+     *                                   not the same.
+     */
+    public static double linSimilarity(Vector a, Vector b) {
+        check(a, b);
+
+        // The total amount of information contained in a.
+        double aInformation = 0;
+        // The total amount of information contained in b.
+        double bInformation = 0;
+        // The total amount of information contained in both vectors.
+        double combinedInformation = 0;
+
+        // Special case when both vectors are sparse vectors.
+        if (a instanceof SparseVector &&
+            b instanceof SparseVector) {
+            // Convert both vectors to sparse vectors.
+            SparseVector sa = (SparseVector) a;
+            int[] aNonZeros = sa.getNonZeroIndices();
+
+            SparseVector sb = (SparseVector) b;
+            int[] bNonZeros = sb.getNonZeroIndices();
+
+            // If b is the smaller vector swap it with a.  This allows the dot
+            // product to work over the vector with the smallest number of non
+            // zero values.
+            if (bNonZeros.length < aNonZeros.length) {
+                SparseVector temp = sa;
+                int[] tempNonZeros = aNonZeros;
+                sa = sb;
+                aNonZeros = bNonZeros;
+                sb = temp;
+                bNonZeros = tempNonZeros;
+            }
+
+            // Compute the combined information by iterating over the vector
+            // with the smallest number of non zero values.
+            for (int index : aNonZeros) {
+                double aValue = a.getValue(index).doubleValue();
+                double bValue = b.getValue(index).doubleValue();
+                aInformation += aValue;
+                combinedInformation += aValue + bValue;
+            }
+
+            // Compute the information from the other vector by iterating over
+            // it's non zero values.
+            for (int index : bNonZeros) {
+                bInformation += b.getValue(index).doubleValue();
+            }
+        }
+        else {
+            // Compute the information between the two vectors by iterating over
+            // all known values.
+            for (int i = 0; i < a.length(); ++i) {
+                double aValue = a.getValue(i).doubleValue();
+                aInformation += aValue;
+
+                double bValue = b.getValue(i).doubleValue();
+                bInformation += bValue;
+
+                if (aValue != 0d && bValue != 0d)
+                    combinedInformation += aValue + bInformation;
+            }
+        }
+        return combinedInformation / (aInformation + bInformation);
+    }
+
+    /**
+     * Computes the lin similarity measure, which is motivated by information
+     * theory priniciples.  This works best if both vectors have already been
+     * weighted using point-wise mutual information.  This similarity measure is
+     * described in more detail in the following paper:
+     *
+     *   <li style="font-family:Garamond, Georgia, serif">D. Lin, "Automatic
+     *   Retrieval and Clustering of Similar Words" <i> Proceedings of the 36th
+     *   Annual Meeting of the Association for Computational Linguistics and
+     *   17th International Conference on Computational Linguistics, Volume 2
+     *   </i>, Montreal, Quebec, Canada, 1998.
+     *   </li>
+     *
+     * @throws IllegalArgumentException when the length of the two vectors are
+     *                                   not the same.
+     */
+    public static double linSimilarity(double[] a, double[] b) {
+        check(a, b);
+
+        // The total amount of information contained in a.
+        double aInformation = 0;
+        // The total amount of information contained in b.
+        double bInformation = 0;
+        // The total amount of information contained in both vectors.
+        double combinedInformation = 0;
+
+        // Compute the information between the two vectors by iterating over
+        // all known values.
+        for (int i = 0; i < a.length; ++i) {
+            aInformation += a[i];
+            bInformation += b[i];
+            if (a[i] != 0d && b[i] != 0d)
+                combinedInformation += a[i] + b[i];
+        }
+        return combinedInformation / (aInformation + bInformation);
+    }
+
+    /**
+     * Computes the lin similarity measure, which is motivated by information
+     * theory priniciples.  This works best if both vectors have already been
+     * weighted using point-wise mutual information.  This similarity measure is
+     * described in more detail in the following paper:
+     *
+     *   <li style="font-family:Garamond, Georgia, serif">D. Lin, "Automatic
+     *   Retrieval and Clustering of Similar Words" <i> Proceedings of the 36th
+     *   Annual Meeting of the Association for Computational Linguistics and
+     *   17th International Conference on Computational Linguistics, Volume 2
+     *   </i>, Montreal, Quebec, Canada, 1998.
+     *   </li>
+     *
+     * @throws IllegalArgumentException when the length of the two vectors are
+     *                                   not the same.
+     */
+    public static double linSimilarity(int[] a, int[] b) {
+        check(a, b);
+
+        // The total amount of information contained in a.
+        double aInformation = 0;
+        // The total amount of information contained in b.
+        double bInformation = 0;
+        // The total amount of information contained in both vectors.
+        double combinedInformation = 0;
+
+        // Compute the information between the two vectors by iterating over
+        // all known values.
+        for (int i = 0; i < a.length; ++i) {
+            aInformation += a[i];
+            bInformation += b[i];
+            if (a[i] != 0d && b[i] != 0d)
+                combinedInformation += a[i] + b[i];
+        }
+        return combinedInformation / (aInformation + bInformation);
+    }
+
+    /**
+     * Computes the K-L Divergence of two probability distributions {@code A}
+     * and {@code B} where the vectors {@code a} and {@code b} correspond to
+     * {@code n} samples from each respective distribution.  The divergence
+     * between two samples is non-symmetric and is frequently used as a distance
+     * metric between vectors from a semantic space.  This metric is described
+     * in more detail in the following paper:
+     *
+     *   <li style="font-family:Garamond, Georgia, serif">S. Kullback and R. A.
+     *   Leibler, "On Information and Sufficiency", <i>The Annals of
+     *   Mathematical Statistics</i> 1951.
+     *   </li>
+     *
+     * @throws IllegalArgumentException when the length of the two vectors are
+     *                                   not the same.
+     */
+    public static double klDivergence(DoubleVector a, DoubleVector b) {
+        check(a, b);
+
+        double divergence = 0;
+
+        // Iterate over just the non zero values of a if it is a sparse vector.
+        if (a instanceof SparseVector) {
+            SparseVector sa = (SparseVector) a;
+            int[] aNonZeros = sa.getNonZeroIndices();
+
+            for (int index : aNonZeros) {
+                double aValue = a.get(index);
+                double bValue = b.get(index);
+
+                // Ignore values from b that are zero, since they would cause a
+                // divide by zero error.
+                if (bValue != 0d)
+                    divergence += aValue * Math.log(aValue / bValue);
+            }
+        }
+        // Otherwise iterate over all values and ignore any that are zero.
+        else {
+            for (int i = 0; i < a.length(); ++i) {
+                double aValue = a.get(i);
+                double bValue = b.get(i);
+
+                if (bValue == 0)
+                    throw new IllegalArgumentException(
+                        "The KL-divergence is not defined when a[i] > 0 and " +
+                        "b[i] == 0.");
+
+                // Ignore values from b that are zero, since they would cause a
+                // divide by zero error.
+                else if (aValue != 0d) {
+                    divergence += aValue * Math.log(aValue / bValue);
+                    System.out.print(divergence + " ");
+                }
+            }
+        }
+
+        return divergence;
+    }
+
+    /**
+     * Computes the K-L Divergence of two probability distributions {@code A}
+     * and {@code B} where the vectors {@code a} and {@code b} correspond to
+     * {@code n} samples from each respective distribution.  The divergence
+     * between two samples is non-symmetric and is frequently used as a distance
+     * metric between vectors from a semantic space.  This metric is described
+     * in more detail in the following paper:
+     *
+     *   <li style="font-family:Garamond, Georgia, serif">S. Kullback and R. A.
+     *   Leibler, "On Information and Sufficiency", <i>The Annals of
+     *   Mathematical Statistics</i> 1951.
+     *   </li>
+     *
+     * @throws IllegalArgumentException when the length of the two vectors are
+     *                                   not the same.
+     */
+    public static double klDivergence(IntegerVector a, IntegerVector b) {
+        check(a, b);
+
+        double divergence = 0;
+
+        // Iterate over just the non zero values of a if it is a sparse vector.
+        if (a instanceof SparseVector) {
+            SparseVector sa = (SparseVector) a;
+            int[] aNonZeros = sa.getNonZeroIndices();
+
+            for (int index : aNonZeros) {
+                double aValue = a.get(index);
+                double bValue = b.get(index);
+
+                if (bValue == 0)
+                    throw new IllegalArgumentException(
+                        "The KL-divergence is not defined when a[i] > 0 and " +
+                        "b[i] == 0.");
+
+                // Ignore values from b that are zero, since they would cause a
+                // divide by zero error.
+                else if (aValue != 0d)
+                    divergence += aValue * Math.log(aValue / bValue);
+            }
+        }
+        // Otherwise iterate over all values and ignore any that are zero.
+        else {
+            for (int i = 0; i < a.length(); ++i) {
+                double aValue = a.get(i);
+                double bValue = b.get(i);
+
+                if (bValue == 0)
+                    throw new IllegalArgumentException(
+                        "The KL-divergence is not defined when a[i] > 0 and " +
+                        "b[i] == 0.");
+
+                // Ignore values from b that are zero, since they would cause a
+                // divide by zero error.
+                else if (aValue != 0d)
+                    divergence += aValue * Math.log(aValue / bValue);
+            }
+        }
+
+        return divergence;
+    }
+
+    /**
+     * Computes the K-L Divergence of two probability distributions {@code A}
+     * and {@code B} where the vectors {@code a} and {@code b} correspond to
+     * {@code n} samples from each respective distribution.  The divergence
+     * between two samples is non-symmetric and is frequently used as a distance
+     * metric between vectors from a semantic space.  This metric is described
+     * in more detail in the following paper:
+     *
+     *   <li style="font-family:Garamond, Georgia, serif">S. Kullback and R. A.
+     *   Leibler, "On Information and Sufficiency", <i>The Annals of
+     *   Mathematical Statistics</i> 1951.
+     *   </li>
+     *
+     * @throws IllegalArgumentException when the length of the two vectors are
+     *                                   not the same.
+     */
+    public static double klDivergence(Vector a, Vector b) {
+        check(a, b);
+
+        double divergence = 0;
+
+        // Iterate over just the non zero values of a if it is a sparse vector.
+        if (a instanceof SparseVector) {
+            SparseVector sa = (SparseVector) a;
+            int[] aNonZeros = sa.getNonZeroIndices();
+
+            for (int index : aNonZeros) {
+                double aValue = a.getValue(index).doubleValue();
+                double bValue = b.getValue(index).doubleValue();
+
+                if (bValue == 0)
+                    throw new IllegalArgumentException(
+                        "The KL-divergence is not defined when a[i] > 0 and " +
+                        "b[i] == 0.");
+
+                // Ignore values from b that are zero, since they would cause a
+                // divide by zero error.
+                else if (aValue != 0d)
+                    divergence += aValue * Math.log(aValue / bValue);
+            }
+        }
+        // Otherwise iterate over all values and ignore any that are zero.
+        else {
+            for (int i = 0; i < a.length(); ++i) {
+                double aValue = a.getValue(i).doubleValue();
+                double bValue = b.getValue(i).doubleValue();
+                if (bValue == 0)
+                    throw new IllegalArgumentException(
+                        "The KL-divergence is not defined when a[i] > 0 and " +
+                        "b[i] == 0.");
+                // Ignore values from a that are zero, since they would cause a
+                // divide by zero error.
+                else if (aValue != 0d)
+                    divergence += aValue * Math.log(aValue / bValue);
+            }
+        }
+
+        return divergence;
+    }
+
+    /**
+     * Computes the K-L Divergence of two probability distributions {@code A}
+     * and {@code B} where the vectors {@code a} and {@code b} correspond to
+     * {@code n} samples from each respective distribution.  The divergence
+     * between two samples is non-symmetric and is frequently used as a distance
+     * metric between vectors from a semantic space.  This metric is described
+     * in more detail in the following paper:
+     *
+     *   <li style="font-family:Garamond, Georgia, serif">S. Kullback and R. A.
+     *   Leibler, "On Information and Sufficiency", <i>The Annals of
+     *   Mathematical Statistics</i> 1951.
+     *   </li>
+     *
+     * @throws IllegalArgumentException when the length of the two vectors are
+     *                                   not the same.
+     */
+    public static double klDivergence(double[] a, double[] b) {
+        check(a, b);
+
+        double divergence = 0;
+
+        // Iterate over all values and ignore any that are zero.
+        for (int i = 0; i < a.length; ++i) {
+            // Ignore values from a that are zero, since they would cause a
+            // divide by zero error.
+            if (b[i] == 0d)
+                throw new IllegalArgumentException(
+                    "The KL-divergence is not defined when a[i] > 0 and " +
+                    "b[i] == 0.");
+            else if (a[i] != 0d)
+                divergence += a[i] * Math.log(a[i]/ b[i]);
+        }
+
+        return divergence;
+    }
+
+    /**
+     * Computes the K-L Divergence of two probability distributions {@code A}
+     * and {@code B} where the vectors {@code a} and {@code b} correspond to
+     * {@code n} samples from each respective distribution.  The divergence
+     * between two samples is non-symmetric and is frequently used as a distance
+     * metric between vectors from a semantic space.  This metric is described
+     * in more detail in the following paper:
+     *
+     *   <li style="font-family:Garamond, Georgia, serif">S. Kullback and R. A.
+     *   Leibler, "On Information and Sufficiency", <i>The Annals of
+     *   Mathematical Statistics</i> 1951.
+     *   </li>
+     *
+     * @throws IllegalArgumentException when the length of the two vectors are
+     *                                   not the same.
+     */
+    public static double klDivergence(int[] a, int[] b) {
+        check(a, b);
+
+        double divergence = 0;
+
+        // Iterate over all values and ignore any that are zero.
+        for (int i = 0; i < a.length; ++i) {
+            // Ignore values from a that are zero, since they would cause a
+            // divide by zero error.
+            if (b[i] == 0d)
+                throw new IllegalArgumentException(
+                    "The KL-divergence is not defined when a[i] > 0 and " +
+                    "b[i] == 0.");
+            else if (a[i] != 0d)
+                divergence += a[i] * Math.log(a[i]/ b[i]);
+        }
+
+        return divergence;
+    }
+
+    /**
+     * Computes <a href="http://en.wikipedia.org/wiki/Kendall%27s_tau">Kendall's
+     * tau</a> of the values in the two arrays.  This method uses tau-b, which
+     * is suitable for arrays with duplicate values.
+     *
+     * @throws IllegalArgumentException when the length of the two arrays are
+     *                                   not the same.
+     */
+    public static double kendallsTau(double[] a, double[] b) {
+        return kendallsTau(Vectors.asVector(a), Vectors.asVector(b));
+    }
+
+    /**
+     * Computes <a href="http://en.wikipedia.org/wiki/Kendall%27s_tau">Kendall's
+     * tau</a> of the values in the two arrays.  This method uses tau-b, which
+     * is suitable for arrays with duplicate values.
+     *
+     * @throws IllegalArgumentException when the length of the two arrays are
+     *                                   not the same.
+     */
+    public static double kendallsTau(int[] a, int[] b) {
+        return kendallsTau(Vectors.asVector(a), Vectors.asVector(b));
+    }
+
+    /**
+     * Computes <a href="http://en.wikipedia.org/wiki/Kendall%27s_tau">Kendall's
+     * tau</a> of the values in the two vectors.  This method uses tau-b, which
+     * is suitable for vectors with duplicate values.
+     *
+     * @throws IllegalArgumentException when the length of the two vectors are
+     *                                   not the same.
+     */
+    public static double kendallsTau(Vector a, Vector b) {
+        return kendallsTau(Vectors.asDouble(a), Vectors.asDouble(b));
+    }
+
+    /**
+     * Computes <a href="http://en.wikipedia.org/wiki/Kendall%27s_tau">Kendall's
+     * tau</a> of the values in the two vectors.  This method uses tau-b, which
+     * is suitable for vectors with duplicate values.
+     *
+     * @throws IllegalArgumentException when the length of the two vectors are
+     *                                   not the same.
+     */
+    public static double kendallsTau(DoubleVector a, DoubleVector b) {
+        check(a, b);
+        // NOTE: slow n^2 version.  Needs to be replaced at some point with the
+        // n-log-n method and to take into account sparse vectors. -jurgens
+        int length = a.length();
+        double numerator = 0;
+
+        // For both a and b, keep track of how many times each position i tied
+        // with some other position for rank.
+        SparseIntegerVector tiesInA = new CompactSparseIntegerVector(length);
+        SparseIntegerVector tiesInB = new CompactSparseIntegerVector(length);
+        boolean foundTies = false;
+
+        int concordant = 0;
+        int discordant = 0;
+
+        // For all pairs, track how many pairs satisfy the ordering
+        for (int i = 0; i < length; ++i) {
+            for (int j = i+1; j < length; ++j) {
+                // NOTE: this value will be 1 if there exists an match or
+                // "concordance" in the ordering of the two pairs.  Otherwise
+                // it, will be a -1 of the pairs are not matched or are
+                // "discordant.
+                double ai = a.get(i);
+                double aj = a.get(j);
+                double bi = b.get(i);
+                double bj = b.get(j);
+
+                // Check for ties
+                boolean atie = ai == aj;
+                if (ai == aj) {
+                    tiesInA.add(i, 1);
+                    foundTies = true;
+                }
+                if (bi == bj) {
+                    tiesInB.add(i, 1);
+                    foundTies = true;
+                }
+                // If there was a tied rank, don't count the comparisons towards
+                // the concordance totals
+                if (ai != aj && bi != bj) {
+                    if ((ai < aj && bi < bj) || (ai > aj && bi > bj))
+                        concordant++;
+                    else
+                        discordant++;
+                }
+            }
+        }
+
+        int n = concordant - discordant;
+        double d = (.5 * (length * (length-1)));
+
+        if (foundTies) {
+            // IMPORTANT NOTE: for the summations, add 1 to the number of ties,
+            // rather than subtract 1.  All the online pseudo code has (ties *
+            // (ties - 1)) / 2, which assumes that for a tied rank, ties will
+            // always have a value of 2 or more.  I think they're double
+            // counting ties somehow, so we add 1 to account for this.  Most
+            // importantly, adding 1 causes all the online Kendall's tau
+            // calculators to agree with our result.
+            double aSum = 0;
+            for (int i : tiesInA.getNonZeroIndices()) {
+                int ties = tiesInA.get(i);
+                aSum += (ties * (ties + 1) * .5);
+            }
+
+            double bSum = 0;
+            for (int i : tiesInB.getNonZeroIndices()) {
+                int ties = tiesInB.get(i);
+                bSum += (ties * (ties + 1) * .5);
+            }
+
+            return n / Math.sqrt((d - aSum) * (d - bSum));
+        }
+        else
+            return n / d;
+    }
+
+    /**
+     * Computes <a href="http://en.wikipedia.org/wiki/Kendall%27s_tau">Kendall's
+     * tau</a> of the values in the two vectors.  This method uses tau-b, which
+     * is suitable for vectors with duplicate values.
+     *
+     * @throws IllegalArgumentException when the length of the two vectors are
+     *                                   not the same.
+     */
+    public static double kendallsTau(IntegerVector a, IntegerVector b) {
+        check(a, b);
+        // NOTE: slow n^2 version.  Needs to be replaced at some point with the
+        // n-log-n method and to take into account sparse vectors. -jurgens
+        int length = a.length();
+        double numerator = 0;
+
+        // For both a and b, keep track of how many times each position i tied
+        // with some other position for rank.
+        SparseIntegerVector tiesInA = new CompactSparseIntegerVector(length);
+        SparseIntegerVector tiesInB = new CompactSparseIntegerVector(length);
+        boolean foundTies = false;
+
+        int concordant = 0;
+        int discordant = 0;
+
+        // For all pairs, track how many pairs satisfy the ordering
+        for (int i = 0; i < length; ++i) {
+            for (int j = i+1; j < length; ++j) {
+                // NOTE: this value will be 1 if there exists an match or
+                // "concordance" in the ordering of the two pairs.  Otherwise
+                // it, will be a -1 of the pairs are not matched or are
+                // "discordant.
+                int ai = a.get(i);
+                int aj = a.get(j);
+                int bi = b.get(i);
+                int bj = b.get(j);
+
+                // Check for ties
+                boolean atie = ai == aj;
+                if (ai == aj) {
+                    tiesInA.add(i, 1);
+                    foundTies = true;
+                }
+                if (bi == bj) {
+                    tiesInB.add(i, 1);
+                    foundTies = true;
+                }
+                // If there was a tied rank, don't count the comparisons towards
+                // the concordance totals
+                if (ai != aj && bi != bj) {
+                    if ((ai < aj && bi < bj) || (ai > aj && bi > bj))
+                        concordant++;
+                    else
+                        discordant++;
+                }
+            }
+        }
+
+        int n = concordant - discordant;
+        double d = (.5 * (length * (length-1)));
+
+        if (foundTies) {
+            // IMPORTANT NOTE: for the summations, add 1 to the number of ties,
+            // rather than subtract 1.  All the online pseudo code has (ties *
+            // (ties - 1)) / 2, which assumes that for a tied rank, ties will
+            // always have a value of 2 or more.  I think they're double
+            // counting ties somehow, so we add 1 to account for this.  Most
+            // importantly, adding 1 causes all the online Kendall's tau
+            // calculators to agree with our result.
+            double aSum = 0;
+            for (int i : tiesInA.getNonZeroIndices()) {
+                int ties = tiesInA.get(i);
+                aSum += (ties * (ties + 1) * .5);
+            }
+
+            double bSum = 0;
+            for (int i : tiesInB.getNonZeroIndices()) {
+                int ties = tiesInB.get(i);
+                bSum += (ties * (ties + 1) * .5);
+            }
+
+            return n / Math.sqrt((d - aSum) * (d - bSum));
+        }
+        else
+            return n / d;
+    }
+
+
+    /**
+     * Computes the <a
+     * href="http://www.unesco.org/webworld/idams/advguide/Chapt4_2.htm">Goodman-Kruskal
+     * Gamma coefficient</a>, which is preferrable to Kendall's &tau; and
+     * Spearman's &rho; when there are many ties in the data.
+     *
+     * @throws IllegalArgumentException when the length of the two vectors are
+     *                                   not the same.
+     */
+    public static double goodmanKruskalGamma(DoubleVector a, DoubleVector b) {
+        check(a, b);
+        // NOTE: slow n^2 version.  Needs to be replaced at some point with the
+        // n-log-n method and to take into account sparse vectors. -jurgens
+        int length = a.length();
+        double numerator = 0;
+
+        int concordant = 0;
+        int discordant = 0;
+
+        // For all pairs, track how many pairs satisfy the ordering
+        for (int i = 0; i < length; ++i) {
+            for (int j = i+1; j < length; ++j) {
+                // NOTE: this value will be 1 if there exists an match or
+                // "concordance" in the ordering of the two pairs.  Otherwise
+                // it, will be a -1 of the pairs are not matched or are
+                // "discordant.
+                double ai = a.get(i);
+                double aj = a.get(j);
+                double bi = b.get(i);
+                double bj = b.get(j);
+
+                // If there was a tied rank, don't count the comparisons towards
+                // the concordance totals
+                if (ai != aj && bi != bj) {
+                    if ((ai < aj && bi < bj) || (ai > aj && bi > bj))
+                        concordant++;
+                    else
+                        discordant++;
+                }
+            }
+        }
+
+        int cd = concordant + discordant;
+        return (cd == 0)
+            ? 0
+            : ((double)(concordant - discordant)) / cd;
+    }
+
+
+    /**
+     * Returns the Tanimoto coefficient of the two {@code double} array instances.
+     *
+     * @throws IllegalArgumentException when the length of the two arrays are
+     *                                  not the same.
+     */
+    public static double tanimotoCoefficient(double[] a, double[] b) {
+        return tanimotoCoefficient(Vectors.asVector(a), Vectors.asVector(b));
+    }
+
+    /**
+     * Returns the Tanimoto coefficient of the two {@code int} array instances.
+     *
+     * @throws IllegalArgumentException when the length of the two arrays are
+     *                                  not the same.
+     */
+    public static double tanimotoCoefficient(int[] a, int[] b) {
+        return tanimotoCoefficient(Vectors.asVector(a), Vectors.asVector(b));
+    }
+
+    /**
+     * Returns the Tanimoto coefficient of the two {@link edu.ucla.sspace.vector.Vector} instances.
+     *
+     * @throws IllegalArgumentException when the length of the two vectors are
+     *                                  not the same.
+     */
+    public static double tanimotoCoefficient(Vector a, Vector b) {
+        return tanimotoCoefficient(Vectors.asDouble(a), Vectors.asDouble(b));
+    }
+
+    /**
+     * Returns the Tanimoto coefficient of the two {@link edu.ucla.sspace.vector.DoubleVector} instances.
+     *
+     * @throws IllegalArgumentException when the length of the two vectors are
+     *                                  not the same.
+     */
+    @SuppressWarnings("unchecked")
+    public static double tanimotoCoefficient(DoubleVector a, DoubleVector b) {
+        check(a,b);
+
+        // IMPLEMENTATION NOTE: The Tanimoto coefficient uses the square of the
+        // vector magnitudes, which we could compute by just summing the square
+        // of the vector values.  This would save a .sqrt() call from the
+        // .magnitude() call.  However, we expect that this method might be
+        // called multiple times.  Therefore, we square the .magnitude() which
+        // should only be two multiplications instaned of |nz| multiplications
+        // on the second call (assuming the vector instances cache their
+        // magnitude, which almost all do).
+        double aMagnitude = a.magnitude();
+        double bMagnitude = b.magnitude();
+       
+        if (aMagnitude == 0 || bMagnitude == 0)
+            return 0;
+
+        double dotProduct = VectorMath.dotProduct(a, b);        
+        double aMagSq = aMagnitude * aMagnitude;
+        double bMagSq = bMagnitude * bMagnitude;
+
+        return dotProduct / (aMagSq + bMagSq - dotProduct);
+    }
+
+    /**
+     * Returns the Tanimoto Coefficient of the two {@code IntegerVector}
+     * instances
+     *
+     * @throws IllegalArgumentException when the length of the two vectors are
+     *                                  not the same.
+     */
+    @SuppressWarnings("unchecked")
+    public static double tanimotoCoefficient(IntegerVector a, IntegerVector b) {
+        check(a,b);
+
+        // IMPLEMENTATION NOTE: The Tanimoto coefficient uses the squart of the
+        // vector magnitudes, which we could compute by just summing the square
+        // of the vector values.  This would save a .sqrt() call from the
+        // .magnitude() call.  However, we expect that this method might be
+        // called multiple times.  Therefore, we square the .magnitude() which
+        // should only be two multiplications instaned of |nz| multiplications
+        // on the second call (assuming the vector instances cache their
+        // magnitude, which almost all do).
+        double aMagnitude = a.magnitude();
+        double bMagnitude = b.magnitude();
+
+        if (aMagnitude == 0 || bMagnitude == 0)
+            return 0;
+
+        int dotProduct = VectorMath.dotProduct(a, b);        
+        double aMagSq = aMagnitude * aMagnitude;
+        double bMagSq = bMagnitude * bMagnitude;
+
+        return dotProduct / (aMagSq + bMagSq - dotProduct);
+    }
+}
